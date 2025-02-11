@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+ 
+<head>
+    <title>Log Viewer</title>
+    <style>
+        body {
+            font-family: monospace;
+            margin: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+ 
+        #log-container {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            height: 80vh;
+            overflow-y: auto;
+        }
+ 
+        .log-line {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #3d3d3d;
+        }
+ 
+        .status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            background: #333;
+            z-index: 1000;
+        }
+ 
+        .status.connected {
+            background: #285;
+        }
+ 
+        .status.disconnected {
+            background: #852;
+        }
+ 
+        .status.connecting {
+            background: #528;
+        }
+    </style>
+</head>
+ 
+<body>
+    <div id="status" class="status connecting">Connecting...</div>
+    <div id="log-container"></div>
+ 
+    <script>
+        const logContainer = document.getElementById('log-container');
+        const statusDiv = document.getElementById('status');
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+ 
+        function connect() {
+            if (ws) {
+                ws.close();
+            }
+ 
+            statusDiv.textContent = 'Connecting...';
+            statusDiv.className = 'status connecting';
+ 
+            const params = new URLSearchParams(window.location.search);
+            const wsPort = params.get('ws_port') || (parseInt(window.location.port) + 1).toString();
+            const wsUrl = `ws://${window.location.hostname}:${wsPort}`;
+ 
+            console.log('Connecting to WebSocket:', wsUrl);
+            ws = new WebSocket(wsUrl);
+ 
+            ws.onopen = function () {
+                console.log('Connected to WebSocket server');
+                statusDiv.textContent = 'Connected';
+                statusDiv.className = 'status connected';
+                reconnectAttempts = 0;
+            };
+ 
+            ws.onmessage = function (event) {
+                try {
+                    const data = JSON.parse(event.data);
+ 
+                    if (data.type === 'initial') {
+                        logContainer.innerHTML = '';
+                        data.lines.forEach(line => {
+                            appendLogLine(line);
+                        });
+                    } else if (data.type === 'update') {
+                        appendLogLine(data.line);
+                    }
+                } catch (e) {
+                    console.error('Error processing message:', e);
+                    appendLogLine('Error processing message: ' + e.message);
+                }
+            };
+ 
+            ws.onclose = function (event) {
+                console.log('WebSocket closed:', event.code, event.reason);
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'status disconnected';
+ 
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    statusDiv.textContent = `Reconnecting in ${delay / 1000} seconds...`;
+                    setTimeout(connect, delay);
+                } else {
+                    statusDiv.textContent = 'Connection failed. Please refresh the page.';
+                }
+            };
+ 
+            ws.onerror = function (error) {
+                console.error('WebSocket error:', error);
+                statusDiv.textContent = 'Connection error';
+                statusDiv.className = 'status disconnected';
+            };
+        }
+ 
+        function appendLogLine(line) {
+            const div = document.createElement('div');
+            div.className = 'log-line';
+            div.textContent = line;
+            logContainer.appendChild(div);
+ 
+            const isNearBottom = logContainer.scrollHeight - logContainer.clientHeight - logContainer.scrollTop < 100;
+            if (isNearBottom) {
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+ 
+            while (logContainer.children.length > 1000) {
+                logContainer.removeChild(logContainer.firstChild);
+            }
+        }
+ 
+        connect();
+ 
+        window.onerror = function (message, source, lineno, colno, error) {
+            console.error('Page error:', message, error);
+            appendLogLine('Page error: ' + message);
+        };
+    </script>
+</body>
+ 
+</html>
